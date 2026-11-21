@@ -1,15 +1,18 @@
 const months='Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ');
 function monthlyStatus(p,m){
- const coverage=100-((p.p*7+m*3)%18)/10;
- const missing=(p.p*7+m*3)%23===0;
- return {coverage,missing,status:m===11?'Upcoming':m===10?'In progress':coverage<99||missing?'Review':'Ready'};
+ const days=batchDays(p,m);
+ return {status:m===11?'Upcoming':m===10?'In progress':days.includes('Review')?'Review':'Ready'};
 }
 function readiness(){
- return `<section class="panel reportpanel"><div class="panelhead"><div><h2>Monthly reporting readiness</h2><small>2026 · Simulated close status through 21 Nov · Select a plant-month</small></div></div><div class="scroll matrixframe"><table class="reportmatrix"><thead><tr><th>Plant</th>${months.map(m=>'<th>'+m+'</th>').join('')}</tr></thead><tbody>${plants.map(p=>'<tr><th>'+p.name+'</th>'+months.map((m,i)=>{const {status}=monthlyStatus(p,i);return `<td><button class="cell ${status.split(' ')[0]}" title="${p.name} · ${m} · ${status}" onclick="monthInfo(${p.p},${i})">${{'Ready':'✓','Review':'!','In progress':'MTD','Upcoming':'—'}[status]}</button></td>`}).join('')+'</tr>').join('')}</tbody></table></div><div class="panelhead"><small>✓ Ready · ! Review · MTD In progress · — Upcoming</small></div></section>`;
+ return `<section class="panel reportpanel"><div class="panelhead"><div><h2>Monthly reporting readiness</h2><small>2026 · Daily batches through 20 Nov · Select a plant-month</small></div><button class="link" onclick="go('Reported energy')">Explore 0188 reported energy</button></div><div class="scroll matrixframe"><table class="reportmatrix"><thead><tr><th>Plant</th>${months.map(m=>'<th>'+m+'</th>').join('')}</tr></thead><tbody>${plants.map(p=>'<tr><th>'+p.name+'</th>'+months.map((m,i)=>{const {status}=monthlyStatus(p,i);return `<td><button class="cell ${status.split(' ')[0]}" data-tip="${p.name} · ${m} 2026 | ${status}" aria-label="${p.name} · ${m} · ${status}" onclick="monthInfo(${p.p},${i})">${{'Ready':'✓','Review':'!','In progress':'MTD','Upcoming':'—'}[status]}</button></td>`}).join('')+'</tr>').join('')}</tbody></table></div><div class="panelhead"><small>✓ Ready · ! Review · MTD In progress · — Upcoming</small></div></section>`;
 }
 function monthInfo(i,m){
  const p=plants[i],v=monthlyStatus(p,m);
- modal(p.name+' · '+months[m]+' 2026','Simulated reporting readiness','<h3>'+v.status+'</h3><p>'+(m===11?'Reporting period starts in December.':'Valid coverage '+v.coverage.toFixed(1)+'% · '+(v.missing?'Required meter missing':'Required meters present')+(m===10?' · Month still open':''))+'</p><small>Ready requires a closed month, ≥99% valid coverage and all required meters present.</small>');
+ const days=batchDays(p,m);
+ modal(p.name+' · '+months[m]+' 2026',m===10?batchNote(p):'Daily close history · Sample data',
+ '<h3>'+v.status+'</h3><div class="daygrid">'+days.map((s,d)=>'<div class="day '+s+'"><b>'+String(d+1).padStart(2,'0')+'</b><small>'+s+'</small></div>').join('')+'</div>'+
+ (m===9&&p.code==='0188'?`<button class="action" onclick="document.querySelector('dialog').close();go('Reported energy')">Explore simulated October energy</button>`:'')+
+ (m===10?'<p>Latest assessed day · '+batchLedger[i].day+' Nov</p><button class="tablebtn" onclick="investigateBatch('+i+')">Inspect readings and flags</button> <button class="tablebtn" onclick="openGoldAudit('+i+')">Inspect Silver → Gold</button>':''));
 }
 function waterfall(rows,totals,matched){
  const matchedA=sum(rows.map(r=>r.matched[0])),matchedB=sum(rows.map(r=>r.matched[1]));
@@ -20,9 +23,16 @@ function waterfall(rows,totals,matched){
 }
 function qualityMatrix(){
  const rules=dqRules.filter(r=>r[0].startsWith('DQ'));
- return `<details open class="study"><summary>Rule incidence across plants · 21 Nov</summary><small>Flagged submeter intervals ÷ expected submeter intervals. Parentheses show distinct affected submeters.</small><div class="scroll matrixframe"><table class="reportmatrix"><thead><tr><th>Plant</th>${rules.map(r=>`<th title="${r[1]}">${r[0]}<br>${r[1]}</th>`).join('')}</tr></thead><tbody>${plants.map(p=>{const subs=flat(p);return '<tr><th>'+p.name+'</th>'+rules.map(([id])=>{let count=0,meters=0,first=-1;for(const s of subs){let n=0;s.readings.forEach((r,t)=>{if(r.hits.some(h=>h.id===id)){n++;if(first===-1)first=t}});count+=n;if(n)meters++}const rate=100*count/(subs.length*96);return `<td><button class="cell" style="background:${rate?'hsl(12 58% '+Math.max(68,94-rate*6)+'%)':'#edf2ef'}" ${count?'':'disabled'} onclick="selectedPlant=${p.p};meterScope=-1;investigationGroup=0;investigationInterval=${first};renderInvestigation()">${rate.toFixed(2)}% (${meters})</button></td>`}).join('')+'</tr>'}).join('')}</tbody></table></div></details>`;
+ return `<details open class="study"><summary>Rule incidence · Latest assessed day per plant</summary><small>Flagged submeter intervals ÷ expected submeter intervals. Parentheses show distinct affected submeters.</small><div class="scroll matrixframe"><table class="reportmatrix"><thead><tr><th>Plant</th>${rules.map(r=>`<th title="${r[1]}">${r[0]}<br>${r[1]}</th>`).join('')}</tr></thead><tbody>${plants.map(p=>{const subs=flat(p);return '<tr><th>'+p.name+' · '+batchLedger[p.p].day+' Nov</th>'+rules.map(([id])=>{let count=0,meters=0,first=-1;for(const s of subs){let n=0;s.readings.forEach((r,t)=>{if(r.hits.some(h=>h.id===id)){n++;if(first===-1)first=t}});count+=n;if(n)meters++}const rate=100*count/(subs.length*96);return `<td><button class="cell" style="background:${rate?'hsl(12 58% '+Math.max(68,94-rate*6)+'%)':'#edf2ef'}" ${count?'':'disabled'} onclick="selectedPlant=${p.p};meterScope=-1;investigationGroup=0;investigationInterval=${first};renderInvestigation()">${rate.toFixed(2)}% (${meters})</button></td>`}).join('')+'</tr>'}).join('')}</tbody></table></div></details>`;
 }
 function incidentTimeline(){
- const incidents=[['Jakarta','No reading','16:00','16:02','16:12','21:30'],['Singapore','No reading','17:30','17:32','17:47','21:30'],['Atlanta','Delayed reading','16:30','16:32','16:45',null],['Cork','Duplicate reading','00:00','00:02',null,null]];
- return `<section class="panel directory"><div class="panelhead"><div><h2>Incident lifecycle</h2><small>Illustrative event history · 21 Nov 2026 UTC · Simulated Teams acknowledgements and recovery</small></div></div><div class="scroll"><table><thead><tr><th>Incident</th><th>Detected</th><th>Workflow accepted</th><th>Operator acknowledged</th><th>Recovered</th></tr></thead><tbody>${incidents.map(([p,issue,...times],i)=>'<tr><th>'+p+' · '+issue+'<br><small>DEMO-'+(i+1)+'</small></th>'+times.map(t=>'<td>'+ (t?'● '+t:'— Pending')+'</td>').join('')+'</tr>').join('')}</tbody></table></div></section>`;
+ return '<section class="panel directory"><div class="panelhead"><h2>Daily batch notifications</h2><small>Teams preview · Sample events</small></div><div class="scroll"><table><thead><tr><th>Plant</th><th>Event</th><th>Reading day</th><th>Detected locally</th></tr></thead><tbody>'+plants.map(p=>{
+ const b=batchLedger[p.p];
+ if(b.state==='Late')return '<tr><th>'+p.name+'</th><td>Delivery overdue</td><td>20 Nov</td><td>21 Nov 08:00</td></tr>';
+ if(b.state!=='Assessed')return '';
+ const counts=new Map();
+ for(const s of flat(p))for(const r of s.readings)for(const h of r.hits)counts.set(h.name,(counts.get(h.name)||0)+1);
+ if(!counts.size)return '';
+ return '<tr><th>'+p.name+'</th><td>Batch digest · '+[...counts].map(([name,count])=>name+' × '+count).join(', ')+'</td><td>'+b.day+' Nov</td><td>21 Nov '+localClock(b.assessed,p)+'</td></tr>';
+ }).join('')+'</tbody></table></div></section>';
 }

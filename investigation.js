@@ -16,7 +16,7 @@ const investigationGroups=[
  ['Usage & drivers',[0,1,2,4,5,6]],
  ['Data quality',[3,7,8,9]],
  ['Operating context',[10,11,12,13,14,15,16,17,18,19]],
- ['All charts',[]]
+ ['All charts',[]], ['Silver → Gold',[]]
 ];
 let investigationGroup=0, activeStudy=0;
 function changeGroup(i){
@@ -41,8 +41,8 @@ function renderInvestigation() {
   $('#body').innerHTML=`<div class="invest-controls"><button class="tablebtn" onclick="go('Plant analysis')">Tag breakdown &amp; week comparison</button>
   <label>Plant <select id="invest-plant">${plants.map(x=>`<option value="${x.p}" ${x===p?'selected':''}>${x.name}</option>`).join('')}</select></label>
   <label>Meter scope <select id="invest-meter"><option value="-1">All meters</option>${p.meters.map((m,j)=>`<option value="${j}" ${meterScope===j?'selected':''}>${m.name}</option>`).join('')}</select></label>
-  </div><div class="inv-tabs" aria-label="Investigation views">${investigationGroups.map(([name],i)=>`<button aria-pressed="${i===investigationGroup}" onclick="changeGroup(${i})">${name}</button>`).join('')}</div><div ${investigationGroup===0?'':'hidden'}><div id="invest-kpis"></div><div class="invest-layout"><section class="panel"><div class="panelhead"><div><h2>Energy profile</h2><small>15-minute readings · UTC</small></div></div>
-  <div id="invest-chart"></div><label class="invest-slider">Selected interval <input id="invest-range" type="range" min="0" max="95" aria-label="Investigation interval UTC"></label><div id="rule-time"></div><div id="invest-events" class="invest-events"></div></section>
+  </div><div class="inv-tabs" aria-label="Investigation views">${investigationGroups.map(([name],i)=>`<button aria-pressed="${i===investigationGroup}" onclick="chartChange(()=>changeGroup(${i}))">${name}</button>`).join('')}</div><div ${investigationGroup===0?'':'hidden'}><div id="invest-kpis"></div><div class="invest-layout"><section class="panel"><div class="panelhead"><div><h2>Energy profile</h2><small>15-minute readings · ${batchNote(p)}</small></div></div>
+  <div id="invest-chart"></div><label class="invest-slider">Selected interval <input id="invest-range" type="range" min="0" max="95" aria-label="Investigation interval, plant local time"></label><div id="rule-time"></div><div id="invest-events" class="invest-events"></div></section>
   <aside class="panel"><div class="panelhead"><h2>Interval evidence</h2><output id="invest-time" class="mono"></output></div><div id="invest-evidence"></div></aside></div>
   <section class="panel directory"><div class="panelhead"><div><h2>Demand composition</h2><small>Observed usage for the day · Select a meter to isolate its profile</small></div></div><div id="invest-mix"></div></section></div><section class="panel directory" id="explorer" ${investigationGroup===0?'hidden':''}></section>`;
   $('#invest-plant').onchange=e=>{selectedPlant=+e.target.value;meterScope=-1;renderInvestigation()};
@@ -63,7 +63,7 @@ function paintInvestigation() {
     const observed=sum(subs.map(s=>s.readings[n].value??0));
     const expected=sum(subs.map(s=>reference.get(s)[n]));
     const flagged=subs.filter(s=>s.readings[n].flag).length;
-    return {observed,expected,flagged,spike:!flagged&&observed-expected>=Math.max(10,expected*.20)};
+    return {observed,expected,flagged,available:subs.filter(s=>s.readings[n].value!==null).length,spike:!flagged&&observed-expected>=Math.max(10,expected*.20)};
   });
   const total=sum(series.map(x=>x.observed)), expected=sum(series.map(x=>x.expected));
   $('#invest-kpis').innerHTML=`<div class="metrics invest-kpis">${[
@@ -84,9 +84,9 @@ function paintInvestigation() {
     ${series.map((q,n)=>q.spike?`<circle cx="${x(n)}" cy="${y(q.observed)}" r="3.6" fill="#c55736"/>`:'').join('')}
     <path d="M${x(t)} 29V218" stroke="#1b3535" stroke-dasharray="4 3"/><circle cx="${x(t)}" cy="${y(series[t].observed)}" r="5" fill="#173c3a" stroke="white" stroke-width="1.5"/>
     ${[0,24,48,72,95].map(n=>`<text x="${x(n)}" y="239" text-anchor="middle">${time(n)}</text>`).join('')}
-    ${series.map((q,n)=>`<rect x="${x(n)-4}" y="28" width="8" height="194" fill="transparent" onclick="inspectInterval(${n})"><title>${time(n)} · ${kwh(q.observed)} kWh${q.flagged?' · Data quality flag':q.spike?' · Usage spike':''}</title></rect>`).join('')}</svg>`;
+    ${series.map((q,n)=>`<rect x="${x(n)-4}" y="28" width="8" height="194" fill="transparent" data-slot="${n}" data-tip="${time(n)} local | Observed: ${q.available?kwh(q.observed)+' kWh':'No reading'} | Baseline: ${kwh(q.expected)} kWh | ${q.available===subs.length?'Difference: '+signed(q.observed-q.expected)+' kWh':'Available readings: '+q.available+' / '+subs.length} | Flagged submeters: ${q.flagged}" onclick="inspectInterval(${n});showAtElement(document.querySelector('.energyplot [data-slot=&quot;${n}&quot;]'))"/>`).join('')}</svg>`;
   $('#invest-range').value=t;
-  $('#invest-range').setAttribute('aria-valuetext',time(t)+' UTC');
+  $('#invest-range').setAttribute('aria-valuetext',time(t)+' local');
   const episodes=[];
   for (const [n,q] of series.entries()) {
     const kind=q.flagged?'Data quality flag':q.spike?'Usage spike':null;
@@ -94,7 +94,7 @@ function paintInvestigation() {
       episodes.push({n,kind});
   }
   $('#invest-events').innerHTML=episodes.length?episodes.map(({n,kind})=>`<button class="tablebtn" onclick="inspectInterval(${n})">${time(n)} · ${kind}</button>`).join(''):'<small>No spikes or quality flags in this scope</small>';
-  $('#invest-time').textContent=time(t)+' UTC';
+  $('#invest-time').textContent=time(t)+' local';
   const q=series[t], rows=[];
   p.meters.forEach((m,j)=>{
     if(meterScope>=0&&meterScope!==j)return;
@@ -110,7 +110,8 @@ function paintInvestigation() {
   const whole=sum(mix.map(x=>x.usage));
   $('#invest-mix').innerHTML=mix.map(({m,j,usage})=>`<button class="mix-row ${j===meterScope?'active-mix':''}" aria-pressed="${j===meterScope}" onclick="meterScope=meterScope===${j}?-1:${j};renderInvestigation()"><b>${m.name}</b><span class="mix-track"><i style="width:${100*usage/whole}%"></i></span><span>${kwh(100*usage/whole)}%</span><span>${kwh(usage)} kWh</span></button>`).join('');
   ruleTimeline(subs,t);
-  if(investigationGroup!==0)drawExplorer(p,subs,series,t);
+  if(investigationGroup===5)renderGold();
+  else if(investigationGroup!==0)drawExplorer(p,subs,series,t);
 }
 
 
@@ -145,18 +146,18 @@ function studyCard(p,subs,series,t,explorerView){
  const valid=series.filter(q=>!q.flagged).map(q=>q.observed);
  const bars=(items,unit,diverging=false)=>{
    const peak=Math.max(1,...items.map(x=>Math.abs(x[1])));
-   return items.map(([label,value,flag])=>`<div class="studybar"><span>${label}</span><div class="studytrack ${diverging?'diverge':''}"><i style="width:${Math.abs(value)/peak*(diverging?50:100)}%;left:${diverging?(value<0?50-Math.abs(value)/peak*50:50):0}%;background:${flag?'repeating-linear-gradient(45deg,#ddac71 0 3px,#f4d7b1 3px 6px)':value<0?'#be7958':'#599c8c'}"></i></div><b>${kwh(value)} ${unit}</b></div>`).join('');
+   return items.map(([label,value,flag])=>`<div class="studybar" tabindex="0" data-tip="${label} | ${kwh(value)} ${unit}"><span>${label}</span><div class="studytrack ${diverging?'diverge':''}"><i style="width:${Math.abs(value)/peak*(diverging?50:100)}%;left:${diverging?(value<0?50-Math.abs(value)/peak*50:50):0}%;background:${flag?'repeating-linear-gradient(45deg,#ddac71 0 3px,#f4d7b1 3px 6px)':value<0?'#be7958':'#599c8c'}"></i></div><b>${kwh(value)} ${unit}</b></div>`).join('');
  };
  const plot=(lines,unit)=>{
    const hi=Math.max(1,...lines.flat()),w=720;
-   return `<svg viewBox="0 0 800 175" role="img" aria-label="${name} in ${unit}"><text x="2" y="18">${kwh(hi)}</text><text x="6" y="146">0</text><path d="M62 10V145H782" fill="none" stroke="#b8c6c2"/>${lines.map((line,i)=>`<polyline points="${line.map((v,n)=>(62+w*n/Math.max(1,line.length-1))+','+(145-130*v/hi)).join(' ')}" stroke="${i?'#bd805c':'#297e71'}" stroke-width="3" fill="none" ${i?'stroke-dasharray="5 4"':''}/>`).join('')}</svg>`;
+   return `<svg viewBox="0 0 800 175" role="img" aria-label="${name} in ${unit}"><text x="2" y="18">${kwh(hi)}</text><text x="6" y="146">0</text><path d="M62 10V145H782" fill="none" stroke="#b8c6c2"/>${lines.map((line,i)=>`<polyline points="${line.map((v,n)=>(62+w*n/Math.max(1,line.length-1))+','+(145-130*v/hi)).join(' ')}" stroke="${i?'#bd805c':'#297e71'}" stroke-width="3" fill="none" ${i?'stroke-dasharray="5 4"':''}/>`).join('')}${lines[0].map((v,n)=>`<rect x="${62+(n-.5)*w/Math.max(1,lines[0].length-1)}" y="10" width="${w/Math.max(1,lines[0].length-1)}" height="135" fill="transparent" data-tip="${lines.length===1?'Rank '+(n+1):time(n)+' local'} | Observed: ${kwh(v)} ${unit}${lines[1]?' | Baseline: '+kwh(lines[1][n])+' '+unit:''}"/>`).join('')}</svg>`;
  };
  let chart='';
  switch(explorerView){
  case 0:chart=bars(subs.filter(s=>!s.readings[t].flag).map(s=>[s.id,s.readings[t].value-reference.get(s)[t]]).sort((a,b)=>Math.abs(b[1])-Math.abs(a[1])),'kWh',true)||'No valid readings';break;
  case 1:chart=bars(hours.map((h,i)=>[time(i*4),sum(h.map(q=>q.observed)),h.some(q=>q.flagged)]),'kWh');break;
- case 2:{let a=0,b=0;chart=plot([series.map(q=>a+=q.observed),series.map(q=>b+=q.expected)],'kWh')+'<small>00:00 – 23:45 UTC · Solid observed / dashed baseline · kWh</small>';break}
- case 3:chart='<small>00:00 – 23:45 UTC · Green valid / orange flagged</small>'+subs.map(s=>`<div class="matrixrow"><span>${s.id}</span><div>${s.readings.map((r,n)=>`<button title="${time(n)} · ${hitNames(r)}" style="background:${r.flag?'#cf894b':'#71a698'}" onclick="openQualityInterval(${n})"></button>`).join('')}</div></div>`).join('');break;
+ case 2:{let a=0,b=0;chart=plot([series.map(q=>a+=q.observed),series.map(q=>b+=q.expected)],'kWh')+'<small>00:00 – 23:45 local · Solid observed / dashed baseline · kWh</small>';break}
+ case 3:chart='<small>00:00 – 23:45 local · Green valid / orange flagged</small>'+subs.map(s=>`<div class="matrixrow"><span>${s.id}</span><div>${s.readings.map((r,n)=>`<button data-tip="${s.id} · ${time(n)} | ${r.value===null?'No usable reading':kwh(r.value)+' kWh'} | ${hitNames(r)}" aria-label="${time(n)} · ${hitNames(r)}" style="background:${r.flag?'#cf894b':'#71a698'}" onclick="openQualityInterval(${n})"></button>`).join('')}</div></div>`).join('');break;
  case 4:{let running=0;const sorted=subs.map(s=>[s.id,total(s)]).sort((a,b)=>b[1]-a[1]);const whole=sum(sorted.map(x=>x[1]));chart=bars(sorted.map(([id,v])=>[id,100*(running+=v)/whole]),'%');break}
  case 5:chart=plot([valid.slice().sort((a,b)=>b-a)],'kWh')+'<small>Highest to lowest valid interval · kWh per 15 minutes</small>';break;
  case 6:{let min=Math.min(...valid),width=(Math.max(...valid)-min)/8||1;const bins=Array(8).fill(0);valid.forEach(v=>bins[Math.min(7,Math.floor((v-min)/width))]++);chart=bars(bins.map((v,i)=>[kwh(min+i*width)+'–'+kwh(min+(i+1)*width)+' kWh',v]),'slots');break}
@@ -175,18 +176,18 @@ function drawExplorer(p,subs,series,t){
  const totalEnergy=sum(h);
  const labels=h.map((_,i)=>String(i).padStart(2,'0'));
  function graphic(content,caption){return '<svg viewBox="0 0 350 115" role="img" aria-label="'+caption+'">'+content+'</svg><small>'+caption+'</small>'}
- function columns(vals,caption,names=labels){const hi=Math.max(...vals,1),w=300/vals.length;return graphic(vals.map((v,i)=>`<rect x="${30+i*w}" y="${84-70*v/hi}" width="${w*.73}" height="${70*v/hi}" fill="#458678"><title>${names[i]} · ${kwh(v)}</title></rect>${(vals.length<6||i%4===0)?`<text x="${30+i*w}" y="102">${names[i]}</text>`:''}`).join(''),caption)}
+ function columns(vals,caption,names=labels){const hi=Math.max(...vals,1),w=300/vals.length;return graphic(vals.map((v,i)=>`<rect tabindex="0" data-tip="${names[i]} · ${kwh(v)} | ${caption}" x="${30+i*w}" y="${84-70*v/hi}" width="${w*.73}" height="${70*v/hi}" fill="#458678"><title>${names[i]} · ${kwh(v)}</title></rect>${(vals.length<6||i%4===0)?`<text x="${30+i*w}" y="102">${names[i]}</text>`:''}`).join(''),caption)}
  const path=(arr,max)=>arr.map((v,i)=>(15+i*320/(arr.length-1))+','+(90-v/max*75)).join(' ');
  const ref=series.map(q=>q.expected),hi=Math.max(...series.map(q=>Math.max(q.expected*1.15,q.observed)));
- const heat=graphic(Array.from({length:7},(_,d)=>labels.map((l,i)=>`<rect x="${25+i*13}" y="${d*14+2}" width="12" height="13" fill="hsl(168 26% ${80-38*(1+Math.sin(i*.3+d*.8))/2}%)"><title>Day ${d+1} · ${l}:00 · simulated usage index</title></rect>`).join('')+`<text y="${d*14+13}">${['M','T','W','T','F','S','S'][d]}</text>`).join(''),'Mon–Sun · 00–23 UTC · darker = higher illustrative load');
- const band=graphic(`<polygon points="${path(ref.map(v=>v*1.15),hi)} ${path(ref.map(v=>v*.85),hi).split(' ').reverse().join(' ')}" fill="#c3dcd1"/><polyline points="${path(series.map(q=>q.observed),hi)}" stroke="#256b61" stroke-width="2" fill="none"/>`,'00–23 UTC · illustrative ±15% band · observed energy');
- const points=graphic(h.map((v,i)=>`<circle cx="${20+production[i]*16}" cy="${90-v/Math.max(...h)*72}" r="3" fill="#347d70"><title>${labels[i]}:00 · ${kwh(production[i])} t · ${kwh(v)} kWh</title></circle>`).join(''),'Horizontal: production (t) · vertical: observed energy (kWh)');
+ const heat=graphic(Array.from({length:7},(_,d)=>labels.map((l,i)=>`<rect data-tip="Day ${d+1} · ${l}:00 | Illustrative index: ${((1+Math.sin(i*.3+d*.8))/2*100).toFixed(1)} / 100" x="${25+i*13}" y="${d*14+2}" width="12" height="13" fill="hsl(168 26% ${80-38*(1+Math.sin(i*.3+d*.8))/2}%)"><title>Day ${d+1} · ${l}:00 · simulated usage index</title></rect>`).join('')+`<text y="${d*14+13}">${['M','T','W','T','F','S','S'][d]}</text>`).join(''),'Mon–Sun · 00–23 local · darker = higher illustrative load');
+ const band=graphic(`<polygon points="${path(ref.map(v=>v*1.15),hi)} ${path(ref.map(v=>v*.85),hi).split(' ').reverse().join(' ')}" fill="#c3dcd1"/><polyline points="${path(series.map(q=>q.observed),hi)}" stroke="#256b61" stroke-width="2" fill="none"/>`,'00–23 local · illustrative ±15% band · observed energy');
+ const points=graphic(h.map((v,i)=>`<circle tabindex="0" data-tip="${labels[i]}:00 | Output: ${kwh(production[i])} t | Energy: ${kwh(v)} kWh" cx="${20+production[i]*16}" cy="${90-v/Math.max(...h)*72}" r="3" fill="#347d70"><title>${labels[i]}:00 · ${kwh(production[i])} t · ${kwh(v)} kWh</title></circle>`).join(''),'Horizontal: production (t) · vertical: observed energy (kWh)');
  const tiers=[.12,.19,.28], costs=tiers.map((r,k)=>sum(h.slice(k*8,k*8+8))*r);
  const qa=series.map(q=>q.flagged>0);
- const gateway=graphic(['Meter flag','Gateway log'].map((n,j)=>`<text x="0" y="${35+j*34}">${n}</text>`+qa.map((v,i)=>`<rect x="${82+2.65*i}" y="${22+j*34}" width="2.6" height="15" fill="${(j?i>=65&&i<78:v)?'#c98654':'#cddecf'}"/>`).join('')).join(''),'00–23 UTC · orange = event · gateway track simulated');
+ const gateway=graphic(['Meter flag','Gateway log'].map((n,j)=>`<text x="0" y="${35+j*34}">${n}</text>`+qa.map((v,i)=>`<rect data-tip="${n} · ${time(i)} | ${(j?i>=65&&i<78:v)?'Event':'Clear'}" x="${82+2.65*i}" y="${22+j*34}" width="2.6" height="15" fill="${(j?i>=65&&i<78:v)?'#c98654':'#cddecf'}"/>`).join('')).join(''),'00–23 local · orange = event · gateway track simulated');
  const peers=['Site A','Site B','Site C','Site D'];
  const charts=[heat,band,columns(h.map((v,i)=>production[i]?v/production[i]:0),'kWh/t by hour · 00–04 excluded (idle hours)'),points,
- columns([sum(h.slice(0,5)),sum(h.slice(5))],'Energy (kWh) · assumed idle schedule 00–05 UTC',['Idle','Running']),
+ columns([sum(h.slice(0,5)),sum(h.slice(5))],'Energy (kWh) · assumed idle schedule 00–05 local',['Idle','Running']),
  columns(costs,'Estimated cost by tariff block · illustrative currency units',['00–08','08–16','16–24']),
  columns([totalEnergy*1.04,totalEnergy,totalEnergy*.04],'Energy (kWh) · illustrative independent supply reading',['Supply','Submeters','Residual']),gateway,
  columns([3,11,29],'Illustrative ingestion delay in seconds',['P50','P95','P99']),
@@ -199,5 +200,5 @@ function drawExplorer(p,subs,series,t){
  const [group,ids]=investigationGroups[investigationGroup];
  const i=activeStudy;
  const card=i<10?studyCard(p,subs,series,t,i):galleryCard(...candidates[i-10].slice(0,2),'Simulated scenario · Operational data required: '+candidates[i-10][2],charts[i-10]);
- $('#explorer').innerHTML=`<div class="panelhead"><h2>${group}</h2><small>${p.name} · ${meterScope<0?'All meters':p.meters[meterScope].name} · ${time(t)} UTC</small></div>${investigationGroup===2?qualityMatrix():''}<div class="focusgrid"><div class="chartchoices">${ids.map(j=>`<button aria-pressed="${j===i}" onclick="openStudy(${j})">${catalog[j][0]}</button>`).join('')}</div><div>${card}</div></div>`;
+ $('#explorer').innerHTML=`<div class="panelhead"><h2>${group}</h2><small>${p.name} · ${meterScope<0?'All meters':p.meters[meterScope].name} · ${time(t)} local</small></div>${investigationGroup===2?qualityMatrix():''}<div class="focusgrid"><div class="chartchoices">${ids.map(j=>`<button aria-pressed="${j===i}" onclick="chartChange(()=>openStudy(${j}))">${catalog[j][0]}</button>`).join('')}</div><div>${card}</div></div>`;
 }

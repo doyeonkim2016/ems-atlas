@@ -15,7 +15,7 @@ function layoutConcept(){
  if(!Object.hasOwn(concepts,concept))return;
  const {title,first}=concepts[concept],body=document.querySelector('#body');
  const lead=body.querySelector(':scope > '+first);
- if(lead)body.prepend(lead);
+ if(lead && concept!=='ledger')body.prepend(lead);
  document.querySelector('#title').textContent=title;
  if(concept==='shift'&&lead){
    lead.querySelector('h2').firstChild.textContent='Alerts for review ';
