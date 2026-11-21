@@ -9,7 +9,7 @@ EMS Atlas는 제조 공장의 에너지 담당자와 데이터 엔지니어가 *
 1. **Reporting → Reported energy**에서 `Demand`, `Chilled storage`, 10월 1일의 10시를 선택합니다.
 2. **10:15**를 열면 누적 reading의 일시적 급증으로 Gold delta가 제외된 사례를 볼 수 있습니다. **10:30**에는 마지막으로 채택한 10:00 reading을 기준으로 증가량을 계산합니다. 뒤의 값에 두 구간의 증가량이 함께 반영되므로 15분별 사용량 배분에는 불확실성이 남습니다.
 3. **18:00**에는 새 기준점이 된 reset anchor가, **22:30**에는 대응하는 Silver 행이 없는 승인 override가 있습니다. 계산 근거에서 이전 기준값, 원본값, 최종 delta, 환산 계수를 확인합니다.
-4. **Reporting alerts**에서 10월 2일 냉동 설비의 휴지 시간 사용을 선택합니다. 연속된 8개 구간이 한 건으로 묶이고, 해당 소비량은 보고 합계에 포함됩니다. 담당자에게는 예정된 세척이나 재가동이 있었는지 질문할 수 있습니다.
+4. **Reporting findings**에서 10월 2일 냉동 설비의 휴지 시간 사용을 선택합니다. 연속된 8개 구간이 한 건으로 묶이고, 해당 소비량은 보고 합계에 포함됩니다. 담당자에게는 예정된 세척이나 재가동이 있었는지 질문할 수 있습니다.
 
 ## 사용자별 주요 화면
 
@@ -61,7 +61,7 @@ Reported energy의 가상 event에서 다섯 CSV를 생성합니다. 태그 ID�
 python3 -m http.server 8000
 ```
 
-브라우저에서 http://localhost:8000 을 엽니다. 보고 수치, 차트, 가상 CSV는 브라우저에서 동작합니다. 이 모드에서 요청 조회·저장은 서버 연결 필요 상태로 표시됩니다.
+브라우저에서 http://localhost:8000 을 엽니다. 보고 수치, 차트, 가상 CSV는 브라우저에서 동작합니다. 이 모드에서는 검토 요청과 DB 기반 Daily rule checks를 이용하려면 Worker 연결이 필요합니다.
 
 요청 저장까지 실행하려면 Node.js로 Worker 번들을 생성합니다.
 
@@ -69,4 +69,10 @@ python3 -m http.server 8000
 node build.mjs
 ```
 
-생성된 dist/server/index.js는 표준 fetch 엔트리포인트를 가진 Worker ES 모듈입니다. Worker 런타임에서 D1 데이터베이스를 DB 이름으로 바인딩하고 0000_review_requests.sql을 먼저 적용합니다. API는 GET으로 요청 목록을 읽고 POST로 생성하며 PATCH로 판정 이력을 갱신합니다. 수정 시 version으로 동시 변경 충돌을 감지합니다. 호스팅 환경에서 사용자 인증과 접근 범위를 설정해야 합니다. 실제 공장 데이터, Teams 웹훅 URL, 토큰, 담당자 이메일은 공개 소스에 넣지 마세요.
+생성된 dist/server/index.js는 표준 fetch 엔트리포인트를 가진 Worker ES 모듈입니다. Worker 런타임에서 D1 데이터베이스를 DB 이름으로 바인딩하고 `0000_review_requests.sql`, `0001_meter_dq.sql` 순서로 적용합니다. API는 GET으로 요청 목록을 읽고 POST로 생성하며 PATCH로 판정 이력을 갱신합니다. 수정 시 version으로 동시 변경 충돌을 감지합니다. 호스팅 환경에서 사용자 인증과 접근 범위를 설정해야 합니다. 실제 공장 데이터, Teams 웹훅 URL, 토큰, 담당자 이메일은 공개 소스에 넣지 마세요.
+
+## DB 기반 일별 룰 검사와 리뷰
+
+Reported energy에서 미터와 날짜를 선택한 후 Daily rule checks의 Load sample day를 누르면 `meter_slot`에 하루 96개 가상 슬롯을 적재합니다. `AFTER INSERT` 트리거가 `demo_v1` 조건을 평가하고 위반마다 `dq_alert`에 기록합니다. 히트맵의 `!`를 선택하면 시각, 룰, reading, delta를 확인할 수 있습니다. 기존 슬롯을 다시 적재하면 건너뜁니다. 정정 데이터 재평가와 미수신 슬롯 생성 스케줄러는 후속 과제입니다. 비교 가능한 주에는 두 점 차트로 전주와 선택 주 MWh를 표시합니다. Teams 전달 상태는 별도로 확인합니다.
+
+[다른 에이전트를 위한 전체 리뷰 프롬프트](REVIEW_PROMPT_KO.md)

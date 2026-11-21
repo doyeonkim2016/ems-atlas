@@ -32,14 +32,23 @@ function compareDesk(tags,first,last){
   return {tag,change:(b-a)/3600,count,a,b};
  }).sort((x,y)=>Math.abs(y.change)-Math.abs(x.change));
 }
+function weekPairs(changes){
+ const matched=changes.filter(x=>x.count>0);
+ if(!matched.length)return '';
+ const ceiling=Math.max(1,...matched.flatMap(x=>[x.a,x.b]));
+ return '<div class="weekpairs"><h3>Same-weekday energy comparison</h3><small>○ Previous week · ● Selected week · matched intervals only</small>'+matched.map(x=>{
+  const a=x.a/ceiling*100,b=x.b/ceiling*100;
+  return `<button onclick="pilotSelect('tag',${pilotTags.indexOf(x.tag)})"><strong>${x.tag.name}</strong><span class="pairtrack" aria-hidden="true"><i style="left:${Math.min(a,b)}%;width:${Math.abs(a-b)}%"></i><em style="left:${a}%"></em><b style="left:${b}%"></b></span><span>${pilotNum(x.a/3600)} → ${pilotNum(x.b/3600)} MWh</span></button>`;
+ }).join('')+'</div>';
+}
 function businessSummary(tags,rows){
  const first=rows[0].i,last=rows.at(-1).i,changes=compareDesk(tags,first,last);
  const findings=episodes(tags).filter(e=>e.start<=last&&e.end>=first);
  const baseline=changes.reduce((s,x)=>s+x.a,0),current=changes.reduce((s,x)=>s+x.b,0);
  const label=baseline?signed((current-baseline)/baseline*100)+'%':'No comparable period';
  const day=i=>utcText(pilotStart+i*900000).slice(5,10);
- return `<section class="panel study"><small>${day(first)} – ${day(last)} UTC · ${reportState.scope} · simulated</small><div class="deskmetrics"><div>Reported energy<strong>${mwh(tags.flatMap(t=>pilotWindow(pilotData.get(t.id))))} MWh</strong></div><div>Same weekdays last week<strong>${label}</strong><small>${changes.length?changes.reduce((s,r)=>s+r.count,0)+' matching meter intervals':'Earlier matching window unavailable'}</small></div><div>Grouped findings<strong>${findings.length}</strong></div></div>${changes.length?'<p>Change drivers · '+changes.map(x=>`<button class="link" onclick="pilotSelect('tag',${pilotTags.indexOf(x.tag)})">${x.tag.name} ${signed(x.change*1000)} kWh</button>`).join(' · ')+'</p>':''}</section>
- <section class="panel directory"><div class="panelhead"><h2>Reporting alerts</h2><small>Adjacent intervals grouped by meter and rule</small></div><div class="scroll"><table><thead><tr><th>Finding</th><th>Meter</th><th>Intervals in scope</th><th>Review / reporting</th></tr></thead><tbody>${findings.map(e=>{const i=Math.max(e.start,first);return `<tr><th><button class="link" onclick="deskJump(${pilotTags.indexOf(e.tag)},${i})">${businessLabels[e.type]}</button></th><td>${e.tag.name}</td><td>${Math.min(e.end,last)-i+1}</td><td data-case="${e.id}">Checking requests…</td></tr>`}).join('')||'<tr><td colspan="4">No findings in this scope</td></tr>'}</tbody></table></div></section>`;
+ return `<section class="panel study"><small>${day(first)} – ${day(last)} UTC · ${reportState.scope} · simulated</small><div class="deskmetrics"><div>Reported energy<strong>${mwh(tags.flatMap(t=>pilotWindow(pilotData.get(t.id))))} MWh</strong></div><div>Same weekdays last week<strong>${label}</strong><small>${changes.length?changes.reduce((s,r)=>s+r.count,0)+' matching meter intervals':'Earlier matching window unavailable'}</small></div><div>Grouped findings<strong>${findings.length}</strong></div></div>${weekPairs(changes)}</section>
+ <details class="panel directory"><summary>Reporting findings · ${findings.length} grouped</summary><div class="scroll"><table><thead><tr><th>Finding</th><th>Meter</th><th>Intervals in scope</th><th>Review / reporting</th></tr></thead><tbody>${findings.map(e=>{const i=Math.max(e.start,first);return `<tr><th><button class="link" onclick="deskJump(${pilotTags.indexOf(e.tag)},${i})">${businessLabels[e.type]}</button></th><td>${e.tag.name}</td><td>${Math.min(e.end,last)-i+1}</td><td data-case="${e.id}">Checking requests…</td></tr>`}).join('')||'<tr><td colspan="4">No findings in this scope</td></tr>'}</tbody></table></div></details>`;
 }
 function deskJump(tag,i){Object.assign(reportState,{tag,day:Math.floor(i/96),hour:Math.floor(i%96/4)});pilotReport();pilotEvidence(i)}
 function caseFor(r){return episodes([r.tag]).find(e=>e.start<=r.i&&e.end>=r.i)}

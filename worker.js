@@ -7,6 +7,7 @@ export default {async fetch(request,env){
   if(!Object.hasOwn(files,file))return new Response('Not found',{status:404});
   return new Response(files[file],{headers:{'Content-Type':({js:'text/javascript',css:'text/css',html:'text/html',svg:'image/svg+xml',json:'application/json'})[ext]||'text/plain'}});
  }
+ if(path==='/api/meter-day')return meterDay(request,u,env.DB);
  if(path!='/api/reviews')return json({},404);
  const db=env.DB;
  if(request.method==='GET')return json((await db.prepare('SELECT * FROM reviews ORDER BY created DESC').all()).results);
